@@ -17,6 +17,7 @@ let currentProviderName = "";
 let currentMedia = null;
 let viewController = null;
 let fullscreenSyncController = null;
+let searchDebounceTimer = null;
 
 function newViewSignal() {
   if (viewController) viewController.abort();
@@ -207,16 +208,19 @@ function renderTitleGrid(items, emptyText = "No results.") {
   view.appendChild(grid);
 }
 
-searchForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
+async function runSearch({ showLoading = true, resetScroll = false } = {}) {
   const q = searchInput.value.trim();
-  if (!q) return;
+  if (!q) {
+    if (viewController) viewController.abort();
+    renderHome();
+    return;
+  }
   const params = new URLSearchParams({ q });
   if (typeFilter.value) params.set("type", typeFilter.value);
   if (yearFilter.value.trim()) params.set("year", yearFilter.value.trim());
   const signal = newViewSignal();
-  view.innerHTML = loadingHtml("Searching");
-  window.scrollTo({ top: 0, behavior: "instant" });
+  if (showLoading) view.innerHTML = loadingHtml("Searching");
+  if (resetScroll) window.scrollTo({ top: 0, behavior: "instant" });
   try {
     const data = await api(`/api/search?${params}`, { signal });
     if (signal.aborted) return;
@@ -224,7 +228,24 @@ searchForm.addEventListener("submit", async (e) => {
   } catch (err) {
     showError(err);
   }
+}
+
+function scheduleSearch() {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    runSearch({ showLoading: searchInput.value.trim().length > 0 });
+  }, 300);
+}
+
+searchForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  clearTimeout(searchDebounceTimer);
+  await runSearch({ resetScroll: true });
 });
+
+searchInput.addEventListener("input", scheduleSearch);
+typeFilter.addEventListener("change", () => runSearch({ showLoading: searchInput.value.trim().length > 0 }));
+yearFilter.addEventListener("input", scheduleSearch);
 
 async function openDetail(mediaType, id) {
   const signal = newViewSignal();
