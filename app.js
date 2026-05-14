@@ -2,6 +2,7 @@ const API_BASE = (window.STREAM_SHOWS_API_BASE
   || (location.hostname.endsWith(".github.io")
     ? "https://shad-server.elf-tarpon.ts.net:8443"
     : ""));
+const AUTH_TOKEN_KEY = "streamEmbedderToken";
 
 const view = document.getElementById("view");
 const searchForm = document.getElementById("search-form");
@@ -20,17 +21,23 @@ homeLink.addEventListener("click", () => {
   renderHome();
 });
 logoutLink.addEventListener("click", async () => {
-  await api("/api/logout", { method: "POST", body: "{}" });
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  await api("/api/logout", { method: "POST", body: "{}" }).catch(() => {});
   renderLogin();
 });
 
 async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (options.body) headers["Content-Type"] = "application/json";
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) headers.Authorization = `Bearer ${token}`;
   const r = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
-    headers: options.body ? { "Content-Type": "application/json" } : undefined,
+    headers,
     ...options,
   });
   if (r.status === 401 && path !== "/api/login") {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
     renderLogin();
     throw new Error("__login_required__");
   }
@@ -77,13 +84,14 @@ function renderLogin(message = "") {
   document.getElementById("login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      await api("/api/login", {
+      const login = await api("/api/login", {
         method: "POST",
         body: JSON.stringify({
           username: document.getElementById("login-username").value,
           password: document.getElementById("login-password").value,
         }),
       });
+      if (login.token) localStorage.setItem(AUTH_TOKEN_KEY, login.token);
       await bootApp();
     } catch {
       renderLogin("Invalid username or password.");
@@ -318,6 +326,48 @@ function hydrateRelatedCards() {
   view.querySelectorAll(".mini-card").forEach((card) => {
     card.addEventListener("click", () => openDetail(card.dataset.type, card.dataset.id));
   });
+  view.querySelectorAll(".rail").forEach(enableDragScroll);
+}
+
+function enableDragScroll(rail) {
+  let active = false;
+  let dragged = false;
+  let startX = 0;
+  let startScrollLeft = 0;
+
+  rail.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse") return;
+    active = true;
+    dragged = false;
+    startX = e.clientX;
+    startScrollLeft = rail.scrollLeft;
+    rail.setPointerCapture(e.pointerId);
+    rail.classList.add("dragging");
+  });
+
+  rail.addEventListener("pointermove", (e) => {
+    if (!active) return;
+    const dx = e.clientX - startX;
+    if (Math.abs(dx) > 4) dragged = true;
+    rail.scrollLeft = startScrollLeft - dx;
+  });
+
+  const release = (e) => {
+    if (!active) return;
+    active = false;
+    rail.classList.remove("dragging");
+    if (rail.hasPointerCapture(e.pointerId)) rail.releasePointerCapture(e.pointerId);
+  };
+  rail.addEventListener("pointerup", release);
+  rail.addEventListener("pointercancel", release);
+
+  rail.addEventListener("click", (e) => {
+    if (dragged) {
+      e.stopPropagation();
+      e.preventDefault();
+      dragged = false;
+    }
+  }, true);
 }
 
 async function loadEpisodes(show, seasonNumber) {

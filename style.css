@@ -169,12 +169,22 @@ main { padding: 1.25rem; max-width: 1400px; margin: 0 auto; }
   display: flex;
   gap: 0.75rem;
   overflow-x: auto;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.75rem;
   scrollbar-width: thin;
+  scrollbar-color: var(--muted) var(--panel);
   scroll-snap-type: x proximity;
+  cursor: grab;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  user-select: none;
 }
-.rail::-webkit-scrollbar { height: 8px; }
-.rail::-webkit-scrollbar-thumb { background: var(--panel-2); border-radius: 4px; }
+.rail.dragging { cursor: grabbing; }
+.rail::-webkit-scrollbar { height: 10px; }
+.rail::-webkit-scrollbar-track { background: var(--panel); border-radius: 5px; }
+.rail::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 5px; }
+.rail::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+.mini-card img { pointer-events: none; }
+.mini-card span { pointer-events: none; }
 .mini-card {
   flex: 0 0 150px;
   scroll-snap-align: start;
