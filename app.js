@@ -601,6 +601,7 @@ function renderIframePlayer({
   const frameborder = iframeOptions.frameborder || "0";
   const allowFullscreen = iframeOptions.allowfullscreen !== false;
   const safeUrl = escapeAttr(url);
+  const safeOpenUrl = escapeAttr(openUrl);
   const safeLabel = escapeAttr(label);
   const safeFallbackLabel = escapeAttr(fallbackLabel);
   const sandboxAttr = sandbox ? `sandbox="${escapeAttr(sandbox)}"` : "";
@@ -611,10 +612,11 @@ function renderIframePlayer({
       <h3 class="section-title">Player</h3>
       ${providerPickerHtml(media, activeProvider)}
     </div>
-    <p class="player-info">Loaded: <b>${safeLabel}</b></p>
+    <p class="player-info">Loaded: <b>${safeLabel}</b> - <a href="${safeOpenUrl}" target="_blank" rel="noreferrer">open in new tab</a></p>
     <div class="player-tools">
       <button id="reload-player" class="secondary" type="button">Reload</button>
       <button id="fullscreen-player" class="secondary" type="button">Fullscreen</button>
+      <a class="button-link" href="${safeOpenUrl}" target="_blank" rel="noreferrer">Open outside iframe</a>
       ${onFail ? `<button id="try-next" class="secondary">Try ${safeFallbackLabel}</button>` : ""}
     </div>
     <div id="player-wrap">
