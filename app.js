@@ -86,12 +86,58 @@ function renderLogin(message = "") {
   });
 }
 
-function renderHome() {
+async function renderHome() {
   setAppVisible(true);
-  view.innerHTML = `
+  view.innerHTML = `<div class="empty">Loading...</div>`;
+  try {
+    const data = await api("/api/home");
+    renderHomeContent(data);
+  } catch (err) {
+    showError(err);
+  }
+}
+
+function renderHomeContent(data) {
+  const heroHtml = data.hero ? renderHero(data.hero) : "";
+  const railsHtml = (data.rails || [])
+    .filter((rail) => rail.items?.length)
+    .map((rail) => relatedSection(rail.label, rail.items))
+    .join("");
+  view.innerHTML = heroHtml + railsHtml || `
     <section class="empty">
       <h2>Search for a movie or TV show.</h2>
       <p>Pick a result, choose a provider, then play it here.</p>
+    </section>`;
+  hydrateRelatedCards();
+  const heroView = document.getElementById("hero-view");
+  if (heroView) {
+    heroView.addEventListener("click", () =>
+      openDetail(heroView.dataset.type, heroView.dataset.id),
+    );
+  }
+}
+
+function renderHero(h) {
+  const bg = h.backdrop ? `style="background-image:url('${h.backdrop}')"` : "";
+  const safeTitle = escapeAttr(h.title || "");
+  const overview = escapeAttr(h.overview || "");
+  return `
+    <section class="detail-hero home-hero" ${bg}>
+      <div class="detail-flex">
+        ${h.poster ? `<img class="detail-poster" src="${h.poster}" alt="" />` : ""}
+        <div class="detail-meta">
+          <h2>${safeTitle}</h2>
+          <div class="pills">
+            ${h.year ? `<span class="pill">${escapeAttr(h.year)}</span>` : ""}
+            ${typeof h.vote === "number" ? `<span class="pill">Star ${h.vote.toFixed(1)}</span>` : ""}
+            <span class="pill">${h.media_type === "tv" ? "TV" : "Movie"}</span>
+          </div>
+          <p class="overview">${overview}</p>
+          <div class="actions">
+            <button id="hero-view" data-type="${escapeAttr(h.media_type)}" data-id="${escapeAttr(h.id)}">View</button>
+          </div>
+        </div>
+      </div>
     </section>`;
 }
 

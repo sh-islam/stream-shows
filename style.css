@@ -166,11 +166,18 @@ main { padding: 1.25rem; max-width: 1400px; margin: 0 auto; }
 }
 
 .rail {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  display: flex;
   gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
 }
+.rail::-webkit-scrollbar { height: 8px; }
+.rail::-webkit-scrollbar-thumb { background: var(--panel-2); border-radius: 4px; }
 .mini-card {
+  flex: 0 0 150px;
+  scroll-snap-align: start;
   padding: 0;
   border: 1px solid var(--border);
   background: var(--panel);
@@ -178,6 +185,7 @@ main { padding: 1.25rem; max-width: 1400px; margin: 0 auto; }
   border-radius: 8px;
   overflow: hidden;
   text-align: left;
+  cursor: pointer;
 }
 .mini-card:hover { border-color: var(--warm); background: var(--panel); }
 .mini-card img {
