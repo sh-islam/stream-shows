@@ -24,12 +24,14 @@ header h1 {
   margin: 0;
   cursor: pointer;
   letter-spacing: 0.02em;
+  min-width: 0;
 }
 .brand {
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
   line-height: 1;
+  flex: 0 1 auto;
 }
 .brand-icon {
   width: 2rem;
@@ -37,6 +39,12 @@ header h1 {
   object-fit: contain;
   border-radius: 6px;
   flex: 0 0 auto;
+}
+.brand span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 nav { display: flex; gap: 0.35rem; }
 body.logged-out header {
@@ -351,10 +359,24 @@ main { padding: 1.25rem; max-width: 1400px; margin: 0 auto; }
 }
 
 @media (max-width: 720px) {
-  header { align-items: stretch; }
-  header h1 { width: 100%; }
-  nav { width: 100%; }
-  .nav-button { flex: 1; }
+  header {
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.75rem;
+  }
+  header h1 {
+    flex: 1 1 auto;
+    max-width: calc(100% - 6rem);
+  }
+  .brand-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+  nav {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+  .nav-button { padding-inline: 0.75rem; }
   #search-form { flex-wrap: wrap; min-width: 100%; }
   #search-input { flex: 1 1 100%; }
   #type-filter,
