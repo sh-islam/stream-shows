@@ -11,6 +11,7 @@ const typeFilter = document.getElementById("type-filter");
 const yearFilter = document.getElementById("year-filter");
 const homeLink = document.getElementById("home-link");
 const logoutLink = document.getElementById("logout-link");
+const MISSING_IMAGE_SRC = "broken_image.png";
 
 let providersCache = null;
 let currentProviderName = "";
@@ -31,6 +32,20 @@ function isAbortError(err) {
 
 function loadingHtml(text = "Loading") {
   return `<div class="loading"><div class="spinner"></div><span>${text}</span></div>`;
+}
+
+function imageSrc(src) {
+  return src || MISSING_IMAGE_SRC;
+}
+
+function bindImageFallbacks(root = document) {
+  root.querySelectorAll("img").forEach((img) => {
+    if (img.dataset.fallbackBound) return;
+    img.dataset.fallbackBound = "true";
+    img.addEventListener("error", () => {
+      if (!img.src.endsWith(MISSING_IMAGE_SRC)) img.src = MISSING_IMAGE_SRC;
+    });
+  });
 }
 
 homeLink.addEventListener("click", () => {
@@ -144,6 +159,7 @@ function renderHomeContent(data) {
       <h2>Search for a movie or TV show.</h2>
       <p>Pick a result, choose a provider, then play it here.</p>
     </section>`;
+  bindImageFallbacks(view);
   hydrateRelatedCards();
   const heroView = document.getElementById("hero-view");
   if (heroView) {
@@ -160,7 +176,7 @@ function renderHero(h) {
   return `
     <section class="detail-hero home-hero" ${bg}>
       <div class="detail-flex">
-        ${h.poster ? `<img class="detail-poster" src="${h.poster}" alt="" />` : ""}
+        <img class="detail-poster" src="${imageSrc(h.poster)}" alt="" />
         <div class="detail-meta">
           <h2>${safeTitle}</h2>
           <div class="pills">
@@ -185,7 +201,7 @@ function makeTitleCard(item) {
   const card = document.createElement("article");
   card.className = "card";
   card.innerHTML = `
-    <img class="card-poster" alt="" src="${item.poster || ""}" />
+    <img class="card-poster" alt="" src="${imageSrc(item.poster)}" />
     <div class="card-body">
       <h3 class="card-title"></h3>
       <p class="card-meta"></p>
@@ -206,6 +222,7 @@ function renderTitleGrid(items, emptyText = "No results.") {
   items.forEach((item) => grid.appendChild(makeTitleCard(item)));
   view.innerHTML = "";
   view.appendChild(grid);
+  bindImageFallbacks(view);
 }
 
 async function runSearch({ showLoading = true, resetScroll = false } = {}) {
@@ -267,7 +284,7 @@ function detailHero(d) {
   return `
     <section class="detail-hero" ${bg}>
       <div class="detail-flex">
-        ${d.poster ? `<img class="detail-poster" src="${d.poster}" alt="" />` : ""}
+        <img class="detail-poster" src="${imageSrc(d.poster)}" alt="" />
         <div class="detail-meta">
           <h2></h2>
           ${d.tagline ? `<p class="tagline"></p>` : ""}
@@ -327,6 +344,7 @@ function renderMovieDetail(d) {
   }));
   document.getElementById("actions").appendChild(playBtn);
   addTrailerButton(d);
+  bindImageFallbacks(view);
   hydrateRelatedCards();
 }
 
@@ -355,6 +373,7 @@ function renderTvDetail(d) {
     tabs.appendChild(tab);
   }
   if (seasons.length) tabs.firstChild.click();
+  bindImageFallbacks(view);
   hydrateRelatedCards();
 }
 
@@ -367,7 +386,7 @@ function relatedSection(title, items = []) {
       <div class="rail">
         ${items.map((item) => `
           <button class="mini-card" data-type="${item.media_type}" data-id="${item.id}">
-            <img alt="" src="${item.poster || ""}" />
+            <img alt="" src="${imageSrc(item.poster)}" />
             <span>${item.title || "(untitled)"}</span>
           </button>`).join("")}
       </div>
@@ -479,7 +498,7 @@ async function loadEpisodes(show, seasonNumber) {
       const card = document.createElement("button");
       card.className = "episode";
       card.innerHTML = `
-        <img src="${ep.still || ""}" alt="" />
+        <img src="${imageSrc(ep.still)}" alt="" />
         <div class="episode-body">
           <h4></h4>
           <p></p>
@@ -500,6 +519,7 @@ async function loadEpisodes(show, seasonNumber) {
     }
     slot.innerHTML = "";
     slot.appendChild(grid);
+    bindImageFallbacks(slot);
   } catch (err) {
     showError(err);
   }
