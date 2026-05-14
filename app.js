@@ -583,6 +583,20 @@ function exitFullscreen() {
   return Promise.resolve(exit.call(document));
 }
 
+async function enterFirstSupportedFullscreen(elements) {
+  let lastErr = null;
+  for (const el of elements) {
+    if (!el) continue;
+    try {
+      await enterFullscreen(el);
+      return el;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("Fullscreen is not supported by this browser.");
+}
+
 function renderIframePlayer({
   url,
   label,
@@ -645,17 +659,21 @@ function renderIframePlayer({
   const fullscreenPlayer = slot.querySelector("#fullscreen-player");
   const syncFullscreenButton = () => {
     if (!fullscreenPlayer) return;
-    fullscreenPlayer.textContent = fullscreenElement() === playerWrap ? "Exit fullscreen" : "Fullscreen";
+    const activeFullscreen = fullscreenElement();
+    fullscreenPlayer.textContent = activeFullscreen === iframe || activeFullscreen === playerWrap
+      ? "Exit fullscreen"
+      : "Fullscreen";
   };
   if (fullscreenPlayer && playerWrap) {
     if (fullscreenSyncController) fullscreenSyncController.abort();
     fullscreenSyncController = new AbortController();
     fullscreenPlayer.addEventListener("click", async () => {
       try {
-        if (fullscreenElement() === playerWrap) {
+        const activeFullscreen = fullscreenElement();
+        if (activeFullscreen === iframe || activeFullscreen === playerWrap) {
           await exitFullscreen();
         } else {
-          await enterFullscreen(playerWrap);
+          await enterFirstSupportedFullscreen([iframe, playerWrap]);
         }
       } catch (err) {
         console.warn("Could not toggle fullscreen", err);
