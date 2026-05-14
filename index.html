@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>stream-embedder</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1 id="home-link">stream-embedder</h1>
+    <nav>
+      <button id="logout-link" type="button" class="nav-button">Logout</button>
+    </nav>
+    <form id="search-form">
+      <input id="search-input" type="search" placeholder="Search movies and TV..." autocomplete="off" />
+      <select id="type-filter" aria-label="Type">
+        <option value="">All</option>
+        <option value="movie">Movies</option>
+        <option value="tv">TV</option>
+      </select>
+      <input id="year-filter" type="number" min="1870" max="2100" placeholder="Year" aria-label="Year" />
+      <button type="submit">Search</button>
+    </form>
+  </header>
+
+  <main id="view"></main>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
