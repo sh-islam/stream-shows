@@ -16,6 +16,7 @@ let providersCache = null;
 let currentProviderName = "";
 let currentMedia = null;
 let viewController = null;
+let fullscreenSyncController = null;
 
 function newViewSignal() {
   if (viewController) viewController.abort();
@@ -544,6 +545,44 @@ function escapeAttr(value) {
     .replaceAll(">", "&gt;");
 }
 
+function normalizeIframeAllow(value) {
+  const allow = value || "autoplay; encrypted-media; fullscreen; picture-in-picture";
+  if (/\bfullscreen\s+\*/i.test(allow)) return allow;
+  if (/(^|;)\s*fullscreen\s*(;|$)/i.test(allow)) {
+    return allow.replace(/(^|;)\s*fullscreen\s*(;|$)/i, (_match, prefix, suffix) => (
+      `${prefix || ""} fullscreen *${suffix || ""}`
+    ));
+  }
+  return `${allow}; fullscreen *`;
+}
+
+function fullscreenElement() {
+  return document.fullscreenElement
+    || document.webkitFullscreenElement
+    || document.mozFullScreenElement
+    || document.msFullscreenElement;
+}
+
+function enterFullscreen(el) {
+  const request = el.requestFullscreen
+    || el.webkitRequestFullscreen
+    || el.webkitRequestFullScreen
+    || el.mozRequestFullScreen
+    || el.msRequestFullscreen;
+  if (!request) return Promise.reject(new Error("Fullscreen is not supported by this browser."));
+  return Promise.resolve(request.call(el));
+}
+
+function exitFullscreen() {
+  const exit = document.exitFullscreen
+    || document.webkitExitFullscreen
+    || document.webkitCancelFullScreen
+    || document.mozCancelFullScreen
+    || document.msExitFullscreen;
+  if (!exit) return Promise.resolve();
+  return Promise.resolve(exit.call(document));
+}
+
 function renderIframePlayer({
   url,
   label,
@@ -555,7 +594,7 @@ function renderIframePlayer({
   fallbackLabel = "",
 }) {
   const slot = document.getElementById("player-slot") || view;
-  const allow = iframeOptions.allow || "autoplay; encrypted-media; fullscreen; picture-in-picture";
+  const allow = normalizeIframeAllow(iframeOptions.allow);
   const referrerPolicy = iframeOptions.referrer_policy || "strict-origin-when-cross-origin";
   const sandbox = iframeOptions.sandbox || "";
   const scrolling = iframeOptions.scrolling || "no";
@@ -576,6 +615,7 @@ function renderIframePlayer({
     <p class="player-info">Loaded: <b>${safeLabel}</b> - <a href="${safeOpenUrl}" target="_blank" rel="noreferrer">open in new tab</a></p>
     <div class="player-tools">
       <button id="reload-player" class="secondary" type="button">Reload</button>
+      <button id="fullscreen-player" class="secondary" type="button">Fullscreen</button>
       <a class="button-link" href="${safeOpenUrl}" target="_blank" rel="noreferrer">Open outside iframe</a>
       ${onFail ? `<button id="try-next" class="secondary">Try ${safeFallbackLabel}</button>` : ""}
     </div>
@@ -587,17 +627,46 @@ function renderIframePlayer({
         frameborder="${escapeAttr(frameborder)}"
         scrolling="${escapeAttr(scrolling)}"
         ${allowFullscreenAttr}
+        webkitallowfullscreen
+        mozallowfullscreen
         allow="${escapeAttr(allow)}">
       </iframe>
     </div>`;
 
   const iframe = slot.querySelector("iframe");
+  const playerWrap = slot.querySelector("#player-wrap");
   const reloadPlayer = slot.querySelector("#reload-player");
   if (reloadPlayer) {
     reloadPlayer.addEventListener("click", () => {
       iframe.dataset.loaded = "";
       iframe.src = url;
     });
+  }
+  const fullscreenPlayer = slot.querySelector("#fullscreen-player");
+  const syncFullscreenButton = () => {
+    if (!fullscreenPlayer) return;
+    fullscreenPlayer.textContent = fullscreenElement() === playerWrap ? "Exit fullscreen" : "Fullscreen";
+  };
+  if (fullscreenPlayer && playerWrap) {
+    if (fullscreenSyncController) fullscreenSyncController.abort();
+    fullscreenSyncController = new AbortController();
+    fullscreenPlayer.addEventListener("click", async () => {
+      try {
+        if (fullscreenElement() === playerWrap) {
+          await exitFullscreen();
+        } else {
+          await enterFullscreen(playerWrap);
+        }
+      } catch (err) {
+        console.warn("Could not toggle fullscreen", err);
+      } finally {
+        syncFullscreenButton();
+      }
+    });
+    ["fullscreenchange", "webkitfullscreenchange", "mozfullscreenchange", "MSFullscreenChange"]
+      .forEach((eventName) => document.addEventListener(eventName, syncFullscreenButton, {
+        signal: fullscreenSyncController.signal,
+      }));
   }
   iframe.addEventListener("load", () => {
     iframe.dataset.loaded = "true";
