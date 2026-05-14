@@ -30,6 +30,10 @@ async function api(path, options = {}) {
     headers: options.body ? { "Content-Type": "application/json" } : undefined,
     ...options,
   });
+  if (r.status === 401 && path !== "/api/login") {
+    renderLogin();
+    throw new Error("__login_required__");
+  }
   if (!r.ok) {
     const text = await r.text();
     throw new Error(`${r.status}: ${text}`);
@@ -45,6 +49,7 @@ async function loadProviders(force = false) {
 }
 
 function showError(err) {
+  if (err?.message === "__login_required__") return;
   view.innerHTML = `<div class="error">${err.message || err}</div>`;
 }
 
