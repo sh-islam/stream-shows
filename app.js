@@ -313,12 +313,16 @@ function relatedSection(title, items = []) {
   if (!items.length) return "";
   return `
     <h3 class="section-title">${title}</h3>
-    <div class="rail">
-      ${items.map((item) => `
-        <button class="mini-card" data-type="${item.media_type}" data-id="${item.id}">
-          <img alt="" src="${item.poster || ""}" />
-          <span>${item.title || "(untitled)"}</span>
-        </button>`).join("")}
+    <div class="rail-wrap">
+      <button class="rail-arrow left" type="button" aria-label="Scroll left">&lsaquo;</button>
+      <div class="rail">
+        ${items.map((item) => `
+          <button class="mini-card" data-type="${item.media_type}" data-id="${item.id}">
+            <img alt="" src="${item.poster || ""}" />
+            <span>${item.title || "(untitled)"}</span>
+          </button>`).join("")}
+      </div>
+      <button class="rail-arrow right" type="button" aria-label="Scroll right">&rsaquo;</button>
     </div>`;
 }
 
@@ -327,6 +331,33 @@ function hydrateRelatedCards() {
     card.addEventListener("click", () => openDetail(card.dataset.type, card.dataset.id));
   });
   view.querySelectorAll(".rail").forEach(enableDragScroll);
+  view.querySelectorAll(".rail-wrap").forEach(wireRailArrows);
+}
+
+function wireRailArrows(wrap) {
+  const rail = wrap.querySelector(".rail");
+  const leftBtn = wrap.querySelector(".rail-arrow.left");
+  const rightBtn = wrap.querySelector(".rail-arrow.right");
+  if (!rail || !leftBtn || !rightBtn) return;
+
+  const refresh = () => {
+    const max = rail.scrollWidth - rail.clientWidth - 1;
+    leftBtn.disabled = rail.scrollLeft <= 0;
+    rightBtn.disabled = max <= 0 || rail.scrollLeft >= max;
+  };
+  const step = (dir) => {
+    rail.scrollBy({ left: dir * rail.clientWidth * 0.85, behavior: "smooth" });
+  };
+
+  leftBtn.addEventListener("click", () => step(-1));
+  rightBtn.addEventListener("click", () => step(1));
+  rail.addEventListener("scroll", refresh, { passive: true });
+  window.addEventListener("resize", refresh);
+  refresh();
+  setTimeout(refresh, 200);
+  rail.querySelectorAll("img").forEach((img) => {
+    if (!img.complete) img.addEventListener("load", refresh, { once: true });
+  });
 }
 
 function enableDragScroll(rail) {
