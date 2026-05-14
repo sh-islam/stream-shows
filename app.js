@@ -104,7 +104,9 @@ function renderLogin(message = "") {
   view.innerHTML = `
     <section class="login-panel">
       <form id="login-form">
-        <h2>Login</h2>
+        <div class="login-brand">
+          <img src="icon.png" alt="" />
+        </div>
         ${message ? `<p class="login-message">${message}</p>` : ""}
         <label>Username
           <input id="login-username" type="text" autocomplete="username" required />
