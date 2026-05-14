@@ -1,6 +1,6 @@
 const API_BASE = (window.STREAM_SHOWS_API_BASE
   || (location.hostname.endsWith(".github.io")
-    ? "https://shad-server.elf-tarpon.ts.net"
+    ? "https://shad-server.elf-tarpon.ts.net:8443"
     : ""));
 
 const view = document.getElementById("view");
