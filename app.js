@@ -15,6 +15,21 @@ const logoutLink = document.getElementById("logout-link");
 let providersCache = null;
 let currentProviderName = "";
 let currentMedia = null;
+let viewController = null;
+
+function newViewSignal() {
+  if (viewController) viewController.abort();
+  viewController = new AbortController();
+  return viewController.signal;
+}
+
+function isAbortError(err) {
+  return err?.name === "AbortError" || /aborted/i.test(err?.message || "");
+}
+
+function loadingHtml(text = "Loading") {
+  return `<div class="loading"><div class="spinner"></div><span>${text}</span></div>`;
+}
 
 homeLink.addEventListener("click", () => {
   searchInput.value = "";
@@ -27,14 +42,16 @@ logoutLink.addEventListener("click", async () => {
 });
 
 async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (options.body) headers["Content-Type"] = "application/json";
+  const { signal, ...rest } = options;
+  const headers = { ...(rest.headers || {}) };
+  if (rest.body) headers["Content-Type"] = "application/json";
   const token = localStorage.getItem(AUTH_TOKEN_KEY);
   if (token) headers.Authorization = `Bearer ${token}`;
   const r = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
     headers,
-    ...options,
+    signal,
+    ...rest,
   });
   if (r.status === 401 && path !== "/api/login") {
     localStorage.removeItem(AUTH_TOKEN_KEY);
@@ -57,6 +74,7 @@ async function loadProviders(force = false) {
 
 function showError(err) {
   if (err?.message === "__login_required__") return;
+  if (isAbortError(err)) return;
   view.innerHTML = `<div class="error">${err.message || err}</div>`;
 }
 
@@ -101,9 +119,12 @@ function renderLogin(message = "") {
 
 async function renderHome() {
   setAppVisible(true);
-  view.innerHTML = `<div class="empty">Loading...</div>`;
+  const signal = newViewSignal();
+  view.innerHTML = loadingHtml();
+  window.scrollTo({ top: 0, behavior: "instant" });
   try {
-    const data = await api("/api/home");
+    const data = await api("/api/home", { signal });
+    if (signal.aborted) return;
     renderHomeContent(data);
   } catch (err) {
     showError(err);
@@ -192,9 +213,12 @@ searchForm.addEventListener("submit", async (e) => {
   const params = new URLSearchParams({ q });
   if (typeFilter.value) params.set("type", typeFilter.value);
   if (yearFilter.value.trim()) params.set("year", yearFilter.value.trim());
-  view.innerHTML = `<div class="empty">Searching...</div>`;
+  const signal = newViewSignal();
+  view.innerHTML = loadingHtml("Searching");
+  window.scrollTo({ top: 0, behavior: "instant" });
   try {
-    const data = await api(`/api/search?${params}`);
+    const data = await api(`/api/search?${params}`, { signal });
+    if (signal.aborted) return;
     renderTitleGrid(data.results);
   } catch (err) {
     showError(err);
@@ -202,9 +226,12 @@ searchForm.addEventListener("submit", async (e) => {
 });
 
 async function openDetail(mediaType, id) {
-  view.innerHTML = `<div class="empty">Loading...</div>`;
+  const signal = newViewSignal();
+  view.innerHTML = loadingHtml();
+  window.scrollTo({ top: 0, behavior: "instant" });
   try {
-    const data = await api(`/api/${mediaType}/${id}`);
+    const data = await api(`/api/${mediaType}/${id}`, { signal });
+    if (signal.aborted) return;
     if (mediaType === "movie") renderMovieDetail(data);
     else renderTvDetail(data);
   } catch (err) {
@@ -327,14 +354,12 @@ function relatedSection(title, items = []) {
 }
 
 function hydrateRelatedCards() {
-  view.querySelectorAll(".mini-card").forEach((card) => {
-    card.addEventListener("click", () => openDetail(card.dataset.type, card.dataset.id));
-  });
-  view.querySelectorAll(".rail").forEach(enableDragScroll);
-  view.querySelectorAll(".rail-wrap").forEach(wireRailArrows);
+  view.querySelectorAll(".rail:not([data-drag-bound='true'])").forEach(enableDragScroll);
+  view.querySelectorAll(".rail-wrap:not([data-arrow-bound='true'])").forEach(wireRailArrows);
 }
 
 function wireRailArrows(wrap) {
+  wrap.dataset.arrowBound = "true";
   const rail = wrap.querySelector(".rail");
   const leftBtn = wrap.querySelector(".rail-arrow.left");
   const rightBtn = wrap.querySelector(".rail-arrow.right");
@@ -361,10 +386,14 @@ function wireRailArrows(wrap) {
 }
 
 function enableDragScroll(rail) {
+  rail.dataset.dragBound = "true";
+  const DRAG_THRESHOLD = 10;
   let active = false;
   let dragged = false;
+  let suppressClick = false;
   let startX = 0;
   let startScrollLeft = 0;
+  let pointerId = null;
 
   rail.addEventListener("pointerdown", (e) => {
     if (e.pointerType !== "mouse") return;
@@ -372,40 +401,56 @@ function enableDragScroll(rail) {
     dragged = false;
     startX = e.clientX;
     startScrollLeft = rail.scrollLeft;
-    rail.setPointerCapture(e.pointerId);
-    rail.classList.add("dragging");
+    pointerId = e.pointerId;
   });
 
   rail.addEventListener("pointermove", (e) => {
     if (!active) return;
     const dx = e.clientX - startX;
-    if (Math.abs(dx) > 4) dragged = true;
-    rail.scrollLeft = startScrollLeft - dx;
+    if (!dragged && Math.abs(dx) > DRAG_THRESHOLD) {
+      dragged = true;
+      suppressClick = true;
+      rail.classList.add("dragging");
+      try { rail.setPointerCapture(pointerId); } catch {}
+    }
+    if (dragged) rail.scrollLeft = startScrollLeft - dx;
   });
 
   const release = (e) => {
     if (!active) return;
     active = false;
     rail.classList.remove("dragging");
-    if (rail.hasPointerCapture(e.pointerId)) rail.releasePointerCapture(e.pointerId);
+    if (pointerId !== null && rail.hasPointerCapture(pointerId)) {
+      rail.releasePointerCapture(pointerId);
+    }
+    pointerId = null;
   };
   rail.addEventListener("pointerup", release);
   rail.addEventListener("pointercancel", release);
 
   rail.addEventListener("click", (e) => {
-    if (dragged) {
+    if (suppressClick) {
       e.stopPropagation();
       e.preventDefault();
+      suppressClick = false;
       dragged = false;
+      return;
+    }
+
+    const card = e.target.closest(".mini-card");
+    if (card) {
+      openDetail(card.dataset.type, card.dataset.id);
     }
   }, true);
 }
 
 async function loadEpisodes(show, seasonNumber) {
   const slot = document.getElementById("episodes-slot");
-  slot.innerHTML = `<div class="empty">Loading episodes...</div>`;
+  const signal = newViewSignal();
+  slot.innerHTML = loadingHtml("Loading episodes");
   try {
-    const data = await api(`/api/tv/${show.id}/season/${seasonNumber}`);
+    const data = await api(`/api/tv/${show.id}/season/${seasonNumber}`, { signal });
+    if (signal.aborted) return;
     const grid = document.createElement("div");
     grid.className = "episodes";
     for (const ep of data.episodes) {
@@ -439,7 +484,9 @@ async function loadEpisodes(show, seasonNumber) {
 }
 
 async function playMedia(media, providerName = "") {
+  const signal = newViewSignal();
   await loadProviders(true);
+  if (signal.aborted) return;
   currentMedia = media;
   const selected = providerName || currentProviderName || providersCache.default;
   currentProviderName = selected;
@@ -452,7 +499,8 @@ async function playMedia(media, providerName = "") {
     episode: media.episode || "",
   });
   try {
-    const { candidates } = await api(`/api/embed-candidates?${qs}`);
+    const { candidates } = await api(`/api/embed-candidates?${qs}`, { signal });
+    if (signal.aborted) return;
     if (!candidates.length) throw new Error("No enabled provider supports this title type.");
     startFallbackPlayer(candidates, media, 0, selected);
   } catch (err) {
