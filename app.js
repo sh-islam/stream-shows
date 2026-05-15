@@ -499,6 +499,8 @@ async function loadEpisodes(show, seasonNumber) {
     for (const ep of data.episodes) {
       const card = document.createElement("button");
       card.className = "episode";
+      card.dataset.season = String(seasonNumber);
+      card.dataset.episode = String(ep.episode_number);
       card.innerHTML = `
         <img src="${imageSrc(ep.still)}" alt="" />
         <div class="episode-body">
@@ -514,17 +516,35 @@ async function loadEpisodes(show, seasonNumber) {
         imdb_id: show.imdb_id || "",
         season: seasonNumber,
         episode: ep.episode_number,
+        episode_name: ep.name || "",
+        show_title: show.title,
         title: `${show.title} S${seasonNumber} E${ep.episode_number}`,
         poster: ep.still || show.poster,
+        episodes: data.episodes.map((episode) => ({
+          episode: episode.episode_number,
+          episode_name: episode.name || "",
+          poster: episode.still || show.poster,
+        })),
       }));
       grid.appendChild(card);
     }
     slot.innerHTML = "";
     slot.appendChild(grid);
     bindImageFallbacks(slot);
+    updateSelectedEpisode(currentMedia);
   } catch (err) {
     showError(err);
   }
+}
+
+function updateSelectedEpisode(media) {
+  document.querySelectorAll(".episode.active").forEach((card) => card.classList.remove("active"));
+  if (!media || media.type !== "tv") return;
+  document.querySelectorAll(".episode").forEach((card) => {
+    const isCurrent = card.dataset.season === String(media.season)
+      && card.dataset.episode === String(media.episode);
+    card.classList.toggle("active", isCurrent);
+  });
 }
 
 async function playMedia(media, providerName = "") {
@@ -532,6 +552,7 @@ async function playMedia(media, providerName = "") {
   await loadProviders(true);
   if (signal.aborted) return;
   currentMedia = media;
+  updateSelectedEpisode(media);
   const selected = providerName || currentProviderName || providersCache.default;
   currentProviderName = selected;
   const qs = new URLSearchParams({
@@ -586,6 +607,44 @@ function escapeAttr(value) {
     .replaceAll("\"", "&quot;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function episodeDisplayName(media) {
+  if (!media?.episode) return "";
+  const epName = media.episode_name || media.name || "";
+  const ep = epName ? `: ${epName}` : "";
+  return `Episode ${media.episode}${ep}`;
+}
+
+function tvEpisodeNavHtml(media) {
+  if (!media || media.type !== "tv" || !Array.isArray(media.episodes)) return "";
+  const currentIndex = media.episodes.findIndex((ep) => Number(ep.episode) === Number(media.episode));
+  const previous = currentIndex > 0 ? media.episodes[currentIndex - 1] : null;
+  const next = currentIndex >= 0 && currentIndex < media.episodes.length - 1 ? media.episodes[currentIndex + 1] : null;
+  const current = media.episodes[currentIndex] || {
+    episode: media.episode,
+    episode_name: media.episode_name || "",
+  };
+  return `
+    <div class="episode-nav" aria-label="Episode navigation">
+      <button id="previous-episode" class="secondary episode-nav-button" type="button" ${previous ? "" : "disabled"}>
+        Previous Episode
+      </button>
+      <p class="current-episode">Current playing: ${escapeAttr(episodeDisplayName(current))}</p>
+      <button id="next-episode" class="secondary episode-nav-button" type="button" ${next ? "" : "disabled"}>
+        Next Episode
+      </button>
+    </div>`;
+}
+
+function mediaForEpisode(baseMedia, episode) {
+  return {
+    ...baseMedia,
+    episode: episode.episode,
+    episode_name: episode.episode_name,
+    title: `${baseMedia.show_title || baseMedia.title} S${baseMedia.season} E${episode.episode}`,
+    poster: episode.poster || baseMedia.poster,
+  };
 }
 
 function normalizeIframeAllow(value) {
@@ -688,7 +747,8 @@ function renderIframePlayer({
         mozallowfullscreen
         allow="${escapeAttr(allow)}">
       </iframe>
-    </div>`;
+    </div>
+    ${tvEpisodeNavHtml(media)}`;
 
   const iframe = slot.querySelector("iframe");
   const playerWrap = slot.querySelector("#player-wrap");
@@ -734,6 +794,25 @@ function renderIframePlayer({
   });
   const tryNext = slot.querySelector("#try-next");
   if (tryNext && onFail) tryNext.addEventListener("click", onFail);
+  const currentIndex = media?.type === "tv" && Array.isArray(media.episodes)
+    ? media.episodes.findIndex((ep) => Number(ep.episode) === Number(media.episode))
+    : -1;
+  const previousEpisode = currentIndex > 0 ? media.episodes[currentIndex - 1] : null;
+  const nextEpisode = currentIndex >= 0 && currentIndex < media.episodes.length - 1
+    ? media.episodes[currentIndex + 1]
+    : null;
+  const previousButton = slot.querySelector("#previous-episode");
+  const nextButton = slot.querySelector("#next-episode");
+  if (previousButton && previousEpisode) {
+    previousButton.addEventListener("click", () => {
+      playMedia(mediaForEpisode(media, previousEpisode));
+    });
+  }
+  if (nextButton && nextEpisode) {
+    nextButton.addEventListener("click", () => {
+      playMedia(mediaForEpisode(media, nextEpisode));
+    });
+  }
   const picker = slot.querySelector("#player-provider-select");
   if (picker && media) {
     picker.addEventListener("change", () => playMedia(media, picker.value));
