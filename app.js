@@ -13,6 +13,9 @@ const searchInput = document.getElementById("search-input");
 const typeFilter = document.getElementById("type-filter");
 const yearFilter = document.getElementById("year-filter");
 const homeLink = document.getElementById("home-link");
+const favoritesLink = document.getElementById("favorites-link");
+const historyLink = document.getElementById("history-link");
+const userLabel = document.getElementById("user-label");
 const logoutLink = document.getElementById("logout-link");
 const MISSING_IMAGE_SRC = "broken_image.png";
 
@@ -22,6 +25,8 @@ let currentMedia = null;
 let viewController = null;
 let fullscreenSyncController = null;
 let searchDebounceTimer = null;
+let currentUser = "";
+let libraryCache = { favorites: [], history: [] };
 
 function routePath() {
   let path = location.pathname;
@@ -80,8 +85,12 @@ homeLink.addEventListener("click", () => {
   yearFilter.value = "";
   navigate("/");
 });
+favoritesLink.addEventListener("click", () => navigate("/favorites"));
+historyLink.addEventListener("click", () => navigate("/history"));
 logoutLink.addEventListener("click", async () => {
   localStorage.removeItem(AUTH_TOKEN_KEY);
+  currentUser = "";
+  libraryCache = { favorites: [], history: [] };
   await api("/api/logout", { method: "POST", body: "{}" }).catch(() => {});
   renderLogin();
 });
@@ -138,6 +147,120 @@ function searchParamsFromInputs() {
   return params;
 }
 
+function setCurrentUser(username = "") {
+  currentUser = username;
+  userLabel.textContent = username ? username : "";
+}
+
+async function loadLibrary() {
+  libraryCache = await api("/api/me/library");
+  libraryCache.favorites ||= [];
+  libraryCache.history ||= [];
+  refreshFavoriteButtons();
+  return libraryCache;
+}
+
+function favoriteKey(item) {
+  const type = item?.type || item?.media_type;
+  const id = item?.tmdb_id || item?.id;
+  if (!type || !id) return "";
+  return `${type}:${id}`;
+}
+
+function itemFromDataset(el) {
+  return {
+    type: el.dataset.type,
+    media_type: el.dataset.type,
+    tmdb_id: el.dataset.tmdbId,
+    id: el.dataset.tmdbId,
+    title: el.dataset.title || "",
+    poster: el.dataset.poster || "",
+    year: el.dataset.year || "",
+  };
+}
+
+function favoritePayload(item) {
+  const type = item?.type || item?.media_type;
+  const id = item?.tmdb_id || item?.id;
+  return {
+    type,
+    media_type: type,
+    tmdb_id: id,
+    id,
+    title: item?.title || "",
+    poster: item?.poster || "",
+    year: item?.year || "",
+  };
+}
+
+function isFavorite(item) {
+  const key = favoriteKey(item);
+  return Boolean(key && libraryCache.favorites?.some((fav) => fav.key === key || favoriteKey(fav) === key));
+}
+
+function favoriteButtonHtml(item, extraClass = "") {
+  const payload = favoritePayload(item);
+  if (!payload.type || !payload.tmdb_id) return "";
+  const active = isFavorite(payload);
+  return `
+    <button
+      class="favorite-toggle ${extraClass} ${active ? "active" : ""}"
+      type="button"
+      aria-label="${active ? "Remove from favorites" : "Add to favorites"}"
+      aria-pressed="${active ? "true" : "false"}"
+      data-type="${escapeAttr(payload.type)}"
+      data-tmdb-id="${escapeAttr(payload.tmdb_id)}"
+      data-title="${escapeAttr(payload.title)}"
+      data-poster="${escapeAttr(payload.poster)}"
+      data-year="${escapeAttr(payload.year)}">
+      ${active ? "&#9829;" : "&#9825;"}
+    </button>`;
+}
+
+function refreshFavoriteButtons(root = document) {
+  root.querySelectorAll(".favorite-toggle").forEach((button) => {
+    const item = itemFromDataset(button);
+    const active = isFavorite(item);
+    button.classList.toggle("active", active);
+    button.innerHTML = active ? "&#9829;" : "&#9825;";
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.setAttribute("aria-label", active ? "Remove from favorites" : "Add to favorites");
+  });
+}
+
+function bindFavoriteButtons(root = document) {
+  root.querySelectorAll(".favorite-toggle:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const item = itemFromDataset(button);
+      const key = favoriteKey(item);
+      if (!key) return;
+      button.disabled = true;
+      try {
+        if (isFavorite(item)) {
+          const data = await api(`/api/me/favorites/${encodeURIComponent(key)}`, { method: "DELETE" });
+          libraryCache.favorites = data.favorites || [];
+        } else {
+          const data = await api("/api/me/favorites", {
+            method: "POST",
+            body: JSON.stringify(favoritePayload(item)),
+          });
+          libraryCache.favorites = data.favorites || [];
+        }
+        refreshFavoriteButtons();
+        if (routePath() === "/favorites") renderFavoritesPage();
+      } catch (err) {
+        showError(err);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+  refreshFavoriteButtons(root);
+}
+
 function setAppVisible(visible) {
   document.body.classList.toggle("logged-out", !visible);
 }
@@ -172,7 +295,7 @@ function renderLogin(message = "") {
         }),
       });
       if (login.token) localStorage.setItem(AUTH_TOKEN_KEY, login.token);
-      await bootApp();
+      await bootApp(login);
     } catch {
       renderLogin("Invalid username or password.");
     }
@@ -205,6 +328,7 @@ function renderHomeContent(data) {
       <p>Pick a result, choose a provider, then play it here.</p>
     </section>`;
   bindImageFallbacks(view);
+  bindFavoriteButtons(view);
   hydrateRelatedCards();
   const heroView = document.getElementById("hero-view");
   if (heroView) {
@@ -221,7 +345,18 @@ function renderHero(h) {
   return `
     <section class="detail-hero home-hero" ${bg}>
       <div class="detail-flex">
-        <img class="detail-poster" src="${imageSrc(h.poster)}" alt="" />
+        <div class="poster-shell">
+          <img class="detail-poster" src="${imageSrc(h.poster)}" alt="" />
+          ${favoriteButtonHtml({
+            type: h.media_type,
+            media_type: h.media_type,
+            tmdb_id: h.id,
+            id: h.id,
+            title: h.title,
+            poster: h.poster,
+            year: h.year,
+          }, "poster-favorite")}
+        </div>
         <div class="detail-meta">
           <h2>${safeTitle}</h2>
           <div class="pills">
@@ -246,7 +381,10 @@ function makeTitleCard(item) {
   const card = document.createElement("article");
   card.className = "card";
   card.innerHTML = `
-    <img class="card-poster" alt="" src="${imageSrc(item.poster)}" />
+    <div class="poster-shell">
+      <img class="card-poster" alt="" src="${imageSrc(item.poster)}" />
+      ${favoriteButtonHtml(item, "poster-favorite")}
+    </div>
     <div class="card-body">
       <h3 class="card-title"></h3>
       <p class="card-meta"></p>
@@ -268,6 +406,63 @@ function renderTitleGrid(items, emptyText = "No results.") {
   view.innerHTML = "";
   view.appendChild(grid);
   bindImageFallbacks(view);
+  bindFavoriteButtons(view);
+}
+
+function libraryItemMeta(item) {
+  if (item.type === "tv" && item.season && item.episode) {
+    return `TV - S${item.season} E${item.episode}${item.episode_name ? " - " + item.episode_name : ""}`;
+  }
+  return `${item.type === "tv" ? "TV" : "Movie"}${item.year ? " - " + item.year : ""}`;
+}
+
+function makeLibraryCard(item, { showHeart = true } = {}) {
+  const card = document.createElement("article");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="poster-shell">
+      <img class="card-poster" alt="" src="${imageSrc(item.poster)}" />
+      ${showHeart ? favoriteButtonHtml(item, "poster-favorite") : ""}
+    </div>
+    <div class="card-body">
+      <h3 class="card-title"></h3>
+      <p class="card-meta"></p>
+    </div>`;
+  card.querySelector(".card-title").textContent = item.title || "(untitled)";
+  card.querySelector(".card-meta").textContent = libraryItemMeta(item);
+  card.addEventListener("click", () => {
+    if (item.type === "tv" && item.season && item.episode) {
+      navigate(`/tv/${item.tmdb_id}/season/${item.season}/episode/${item.episode}`);
+    } else {
+      navigate(`/${item.type}/${item.tmdb_id}`);
+    }
+  });
+  return card;
+}
+
+function renderLibraryGrid(title, items, emptyText, options = {}) {
+  setAppVisible(true);
+  view.innerHTML = `
+    <h3 class="section-title">${title}</h3>
+    <div id="library-grid"></div>`;
+  const grid = document.getElementById("library-grid");
+  if (!items.length) {
+    view.innerHTML += `<div class="empty">${emptyText}</div>`;
+    return;
+  }
+  grid.className = "grid";
+  items.forEach((item) => grid.appendChild(makeLibraryCard(item, options)));
+  bindImageFallbacks(view);
+  bindFavoriteButtons(view);
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+function renderFavoritesPage() {
+  renderLibraryGrid("Favorites", libraryCache.favorites || [], "No favorites yet.");
+}
+
+function renderHistoryPage() {
+  renderLibraryGrid("History", libraryCache.history || [], "No watch history yet.", { showHeart: false });
 }
 
 async function runSearch({
@@ -339,10 +534,22 @@ async function openDetail(mediaType, id, routeState = {}) {
 function detailHero(d) {
   const bg = d.backdrop ? `style="background-image:url('${d.backdrop}')"` : "";
   const cast = (d.cast || []).map((c) => c.name).join(" - ");
+  const favItem = {
+    type: d.media_type,
+    media_type: d.media_type,
+    tmdb_id: d.id,
+    id: d.id,
+    title: d.title,
+    poster: d.poster,
+    year: d.year,
+  };
   return `
     <section class="detail-hero" ${bg}>
       <div class="detail-flex">
-        <img class="detail-poster" src="${imageSrc(d.poster)}" alt="" />
+        <div class="poster-shell">
+          <img class="detail-poster" src="${imageSrc(d.poster)}" alt="" />
+          ${favoriteButtonHtml(favItem, "poster-favorite")}
+        </div>
         <div class="detail-meta">
           <h2></h2>
           ${d.tagline ? `<p class="tagline"></p>` : ""}
@@ -403,6 +610,7 @@ function renderMovieDetail(d) {
   document.getElementById("actions").appendChild(playBtn);
   addTrailerButton(d);
   bindImageFallbacks(view);
+  bindFavoriteButtons(view);
   hydrateRelatedCards();
 }
 
@@ -434,6 +642,7 @@ function renderTvDetail(d, routeState = {}) {
   }
   if (targetSeason) loadEpisodes(d, targetSeason, routeState.episode);
   bindImageFallbacks(view);
+  bindFavoriteButtons(view);
   hydrateRelatedCards();
 }
 
@@ -445,16 +654,20 @@ function relatedSection(title, items = []) {
       <button class="rail-arrow left" type="button" aria-label="Scroll left">&lsaquo;</button>
       <div class="rail">
         ${items.map((item) => `
-          <button class="mini-card" data-type="${item.media_type}" data-id="${item.id}">
-            <img alt="" src="${imageSrc(item.poster)}" />
+          <article class="mini-card" data-type="${item.media_type}" data-id="${item.id}" role="button" tabindex="0">
+            <div class="poster-shell">
+              <img alt="" src="${imageSrc(item.poster)}" />
+              ${favoriteButtonHtml(item, "poster-favorite")}
+            </div>
             <span>${item.title || "(untitled)"}</span>
-          </button>`).join("")}
+          </article>`).join("")}
       </div>
       <button class="rail-arrow right" type="button" aria-label="Scroll right">&rsaquo;</button>
     </div>`;
 }
 
 function hydrateRelatedCards() {
+  bindFavoriteButtons(view);
   view.querySelectorAll(".rail:not([data-drag-bound='true'])").forEach(enableDragScroll);
   view.querySelectorAll(".rail-wrap:not([data-arrow-bound='true'])").forEach(wireRailArrows);
 }
@@ -543,6 +756,13 @@ function enableDragScroll(rail) {
       navigate(`/${card.dataset.type}/${card.dataset.id}`);
     }
   }, true);
+  rail.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const card = e.target.closest(".mini-card");
+    if (!card || e.target.closest(".favorite-toggle")) return;
+    e.preventDefault();
+    navigate(`/${card.dataset.type}/${card.dataset.id}`);
+  });
 }
 
 function episodeList(dataEpisodes, show) {
@@ -644,6 +864,7 @@ async function playMedia(media, providerName = "") {
     if (signal.aborted) return;
     if (!candidates.length) throw new Error("No enabled provider supports this title type.");
     startFallbackPlayer(candidates, media, 0, selected);
+    recordHistory(media);
   } catch (err) {
     showError(err);
   }
@@ -721,6 +942,33 @@ function mediaForEpisode(baseMedia, episode) {
     title: `${baseMedia.show_title || baseMedia.title} S${baseMedia.season} E${episode.episode}`,
     poster: episode.poster || baseMedia.poster,
   };
+}
+
+async function recordHistory(media) {
+  if (!media?.type || !media?.tmdb_id) return;
+  const payload = {
+    type: media.type,
+    media_type: media.type,
+    tmdb_id: media.tmdb_id,
+    id: media.tmdb_id,
+    title: media.title || media.show_title || "",
+    poster: media.poster || "",
+    year: media.year || "",
+  };
+  if (media.type === "tv") {
+    payload.season = media.season;
+    payload.episode = media.episode;
+    payload.episode_name = media.episode_name || "";
+  }
+  try {
+    const data = await api("/api/me/history", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    libraryCache.history = data.history || [];
+  } catch (err) {
+    console.warn("Could not save watch history", err);
+  }
 }
 
 function normalizeIframeAllow(value) {
@@ -900,10 +1148,11 @@ function renderIframePlayer({
   slot.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-async function bootApp() {
+async function bootApp(sessionInfo = {}) {
   setAppVisible(true);
+  setCurrentUser(sessionInfo.user || currentUser);
   try {
-    await loadProviders(true);
+    await Promise.all([loadProviders(true), loadLibrary()]);
   } catch (err) {
     showError(err);
   }
@@ -932,6 +1181,16 @@ function renderCurrentRoute() {
     runSearch({ showLoading: true, resetScroll: true });
     return;
   }
+  if (path === "/favorites") {
+    syncSearchInputs(new URLSearchParams());
+    renderFavoritesPage();
+    return;
+  }
+  if (path === "/history") {
+    syncSearchInputs(new URLSearchParams());
+    renderHistoryPage();
+    return;
+  }
   if (movieMatch) {
     openDetail("movie", movieMatch[1]);
     return;
@@ -953,7 +1212,7 @@ window.addEventListener("popstate", renderCurrentRoute);
 (async () => {
   try {
     const session = await api("/api/session");
-    if (session.authenticated) await bootApp();
+    if (session.authenticated) await bootApp(session);
     else renderLogin();
   } catch {
     renderLogin();
