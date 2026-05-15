@@ -14,7 +14,6 @@ const typeFilter = document.getElementById("type-filter");
 const yearFilter = document.getElementById("year-filter");
 const homeLink = document.getElementById("home-link");
 const favoritesLink = document.getElementById("favorites-link");
-const historyLink = document.getElementById("history-link");
 const userLabel = document.getElementById("user-label");
 const logoutLink = document.getElementById("logout-link");
 const MISSING_IMAGE_SRC = "broken_image.png";
@@ -26,7 +25,7 @@ let viewController = null;
 let fullscreenSyncController = null;
 let searchDebounceTimer = null;
 let currentUser = "";
-let libraryCache = { favorites: [], history: [] };
+let libraryCache = { favorites: [] };
 let recommendationsCache = [];
 
 function routePath() {
@@ -87,11 +86,10 @@ homeLink.addEventListener("click", () => {
   navigate("/");
 });
 favoritesLink.addEventListener("click", () => navigate("/favorites"));
-historyLink.addEventListener("click", () => navigate("/history"));
 logoutLink.addEventListener("click", async () => {
   localStorage.removeItem(AUTH_TOKEN_KEY);
   currentUser = "";
-  libraryCache = { favorites: [], history: [] };
+  libraryCache = { favorites: [] };
   await api("/api/logout", { method: "POST", body: "{}" }).catch(() => {});
   renderLogin();
 });
@@ -156,7 +154,6 @@ function setCurrentUser(username = "") {
 async function loadLibrary() {
   libraryCache = await api("/api/me/library");
   libraryCache.favorites ||= [];
-  libraryCache.history ||= [];
   refreshFavoriteButtons();
   return libraryCache;
 }
@@ -469,10 +466,6 @@ function renderFavoritesPage() {
       <div id="recommendations-slot">${loadingHtml("Finding picks")}</div>`,
   });
   loadRecommendations();
-}
-
-function renderHistoryPage() {
-  renderLibraryGrid("History", libraryCache.history || [], "No watch history yet.", { showHeart: false });
 }
 
 async function loadRecommendations() {
@@ -896,7 +889,6 @@ async function playMedia(media, providerName = "") {
     if (signal.aborted) return;
     if (!candidates.length) throw new Error("No enabled provider supports this title type.");
     startFallbackPlayer(candidates, media, 0, selected);
-    recordHistory(media);
   } catch (err) {
     showError(err);
   }
@@ -974,33 +966,6 @@ function mediaForEpisode(baseMedia, episode) {
     title: `${baseMedia.show_title || baseMedia.title} S${baseMedia.season} E${episode.episode}`,
     poster: episode.poster || baseMedia.poster,
   };
-}
-
-async function recordHistory(media) {
-  if (!media?.type || !media?.tmdb_id) return;
-  const payload = {
-    type: media.type,
-    media_type: media.type,
-    tmdb_id: media.tmdb_id,
-    id: media.tmdb_id,
-    title: media.title || media.show_title || "",
-    poster: media.poster || "",
-    year: media.year || "",
-  };
-  if (media.type === "tv") {
-    payload.season = media.season;
-    payload.episode = media.episode;
-    payload.episode_name = media.episode_name || "";
-  }
-  try {
-    const data = await api("/api/me/history", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    libraryCache.history = data.history || [];
-  } catch (err) {
-    console.warn("Could not save watch history", err);
-  }
 }
 
 function normalizeIframeAllow(value) {
@@ -1216,11 +1181,6 @@ function renderCurrentRoute() {
   if (path === "/favorites") {
     syncSearchInputs(new URLSearchParams());
     renderFavoritesPage();
-    return;
-  }
-  if (path === "/history") {
-    syncSearchInputs(new URLSearchParams());
-    renderHistoryPage();
     return;
   }
   if (movieMatch) {
