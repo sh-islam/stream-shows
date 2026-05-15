@@ -1,30 +1,83 @@
-# stream-shows (frontend)
+# stream-shows frontend
 
-Vanilla HTML/CSS/JS frontend for the stream-shows TMDB browser. Static site, no build step. Backend lives in a separate repo (`video-streaming-site-gh`, deployed to a Tailscale-only Docker container).
+Vanilla HTML/CSS/JS frontend for a personal media browser. There is no build step.
 
 Live: https://sh-islam.github.io/stream-shows/
 
-## How it finds the backend
+## What this repo contains
 
-`app.js` picks the API base from `window.STREAM_SHOWS_API_BASE`, then falls back to:
+- Login screen and authenticated app shell.
+- Home, search, detail, season, episode, and favorites views.
+- Client-side routing so browser Back/Forward works inside the app.
+- Player UI, source selection, fullscreen controls, and episode navigation.
+- Per-user favorites UI synced through the backend.
+- Favorites page with backend-generated recommendations.
+- Static assets for icons, fallback posters, and styling.
 
-- `https://shad-server.elf-tarpon.ts.net` when the page is served from `*.github.io` (only reachable from devices on the tailnet)
-- empty string (same-origin) otherwise — for local dev when the Flask backend serves the static files
+## Backend API
 
-Override at runtime in the browser console: `window.STREAM_SHOWS_API_BASE = "http://localhost:5000"`.
+The frontend talks to the backend through these main route groups:
 
-## Local dev
+```text
+GET  /api/session
+POST /api/login
+POST /api/logout
 
-Run the backend (`python app.py` in the backend repo) at `http://localhost:5000`. It serves these static files too, so just open the backend URL.
+GET /api/home
+GET /api/search
+GET /api/movie/:id
+GET /api/tv/:id
+GET /api/tv/:id/season/:season
 
-To preview the static files without the backend, use any static server:
+GET /api/providers
+GET /api/embed-candidates
+
+GET    /api/me/library
+POST   /api/me/favorites
+DELETE /api/me/favorites/:key
+GET    /api/me/recommendations
+```
+
+## Client Routes
+
+The app owns these browser routes:
+
+```text
+/
+/search?q=...
+/movie/:id
+/tv/:id
+/tv/:id/season/:season
+/tv/:id/season/:season/episode/:episode
+/favorites
+```
+
+`404.html` mirrors `index.html` so static hosting can reload deep links into the app.
+
+## Backend Selection
+
+`app.js` reads `window.STREAM_SHOWS_API_BASE` first. If that is not set, it uses the production backend when served from GitHub Pages, and same-origin otherwise.
+
+Override during local/static testing:
+
+```js
+window.STREAM_SHOWS_API_BASE = "http://localhost:5000";
+```
+
+## Local Dev
+
+Best local loop: run the backend from the backend repo, then open the backend URL. The backend serves these frontend files and API calls are same-origin.
+
+```powershell
+python app.py
+```
+
+Static-only preview is possible, but API calls need `window.STREAM_SHOWS_API_BASE` pointed at a running backend:
 
 ```bash
 python -m http.server 8080
 ```
 
-Then visit http://localhost:8080 — API calls will hit `localhost:8080` (no backend) and 404; for a real loop, run the backend.
-
 ## Deploy
 
-Pushing to `main` on GitHub triggers GitHub Pages to rebuild from the repo root.
+Pushing frontend `main` to GitHub triggers GitHub Pages to rebuild.
