@@ -3,6 +3,9 @@ const API_BASE = (window.STREAM_SHOWS_API_BASE
     ? "https://shad-server.elf-tarpon.ts.net:8443"
     : ""));
 const AUTH_TOKEN_KEY = "streamEmbedderToken";
+const APP_BASE = location.hostname.endsWith(".github.io")
+  ? `/${location.pathname.split("/").filter(Boolean)[0] || "stream-shows"}`
+  : "";
 
 const view = document.getElementById("view");
 const searchForm = document.getElementById("search-form");
@@ -19,6 +22,29 @@ let currentMedia = null;
 let viewController = null;
 let fullscreenSyncController = null;
 let searchDebounceTimer = null;
+
+function routePath() {
+  let path = location.pathname;
+  if (APP_BASE && path.startsWith(APP_BASE)) path = path.slice(APP_BASE.length) || "/";
+  return path || "/";
+}
+
+function appUrl(path, params = null) {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const query = params instanceof URLSearchParams && params.toString() ? `?${params}` : "";
+  return `${APP_BASE}${cleanPath}${query}`;
+}
+
+function setRoute(path, { replace = false, params = null } = {}) {
+  const url = appUrl(path, params);
+  if (`${location.pathname}${location.search}` === url) return;
+  history[replace ? "replaceState" : "pushState"]({}, "", url);
+}
+
+function navigate(path, options = {}) {
+  setRoute(path, options);
+  renderCurrentRoute();
+}
 
 function newViewSignal() {
   if (viewController) viewController.abort();
@@ -50,7 +76,9 @@ function bindImageFallbacks(root = document) {
 
 homeLink.addEventListener("click", () => {
   searchInput.value = "";
-  renderHome();
+  typeFilter.value = "";
+  yearFilter.value = "";
+  navigate("/");
 });
 logoutLink.addEventListener("click", async () => {
   localStorage.removeItem(AUTH_TOKEN_KEY);
@@ -93,6 +121,21 @@ function showError(err) {
   if (err?.message === "__login_required__") return;
   if (isAbortError(err)) return;
   view.innerHTML = `<div class="error">${err.message || err}</div>`;
+}
+
+function syncSearchInputs(params) {
+  searchInput.value = params.get("q") || "";
+  typeFilter.value = params.get("type") || "";
+  yearFilter.value = params.get("year") || "";
+}
+
+function searchParamsFromInputs() {
+  const params = new URLSearchParams();
+  const q = searchInput.value.trim();
+  if (q) params.set("q", q);
+  if (typeFilter.value) params.set("type", typeFilter.value);
+  if (yearFilter.value.trim()) params.set("year", yearFilter.value.trim());
+  return params;
 }
 
 function setAppVisible(visible) {
@@ -166,7 +209,7 @@ function renderHomeContent(data) {
   const heroView = document.getElementById("hero-view");
   if (heroView) {
     heroView.addEventListener("click", () =>
-      openDetail(heroView.dataset.type, heroView.dataset.id),
+      navigate(`/${heroView.dataset.type}/${heroView.dataset.id}`),
     );
   }
 }
@@ -210,7 +253,7 @@ function makeTitleCard(item) {
     </div>`;
   card.querySelector(".card-title").textContent = item.title || "(untitled)";
   card.querySelector(".card-meta").textContent = titleMeta(item);
-  card.addEventListener("click", () => openDetail(item.media_type, item.id || item.tmdb_id));
+  card.addEventListener("click", () => navigate(`/${item.media_type}/${item.id || item.tmdb_id}`));
   return card;
 }
 
@@ -227,16 +270,21 @@ function renderTitleGrid(items, emptyText = "No results.") {
   bindImageFallbacks(view);
 }
 
-async function runSearch({ showLoading = true, resetScroll = false } = {}) {
+async function runSearch({
+  showLoading = true,
+  resetScroll = false,
+  updateRoute = false,
+  replaceRoute = true,
+} = {}) {
   const q = searchInput.value.trim();
   if (!q) {
     if (viewController) viewController.abort();
+    if (updateRoute) setRoute("/", { replace: replaceRoute });
     renderHome();
     return;
   }
-  const params = new URLSearchParams({ q });
-  if (typeFilter.value) params.set("type", typeFilter.value);
-  if (yearFilter.value.trim()) params.set("year", yearFilter.value.trim());
+  const params = searchParamsFromInputs();
+  if (updateRoute) setRoute("/search", { replace: replaceRoute, params });
   const signal = newViewSignal();
   if (showLoading) view.innerHTML = loadingHtml("Searching");
   if (resetScroll) window.scrollTo({ top: 0, behavior: "instant" });
@@ -252,21 +300,29 @@ async function runSearch({ showLoading = true, resetScroll = false } = {}) {
 function scheduleSearch() {
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(() => {
-    runSearch({ showLoading: searchInput.value.trim().length > 0 });
+    runSearch({
+      showLoading: searchInput.value.trim().length > 0,
+      updateRoute: true,
+      replaceRoute: routePath() === "/search",
+    });
   }, 300);
 }
 
 searchForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   clearTimeout(searchDebounceTimer);
-  await runSearch({ resetScroll: true });
+  await runSearch({ resetScroll: true, updateRoute: true, replaceRoute: false });
 });
 
 searchInput.addEventListener("input", scheduleSearch);
-typeFilter.addEventListener("change", () => runSearch({ showLoading: searchInput.value.trim().length > 0 }));
+typeFilter.addEventListener("change", () => runSearch({
+  showLoading: searchInput.value.trim().length > 0,
+  updateRoute: true,
+  replaceRoute: routePath() === "/search",
+}));
 yearFilter.addEventListener("input", scheduleSearch);
 
-async function openDetail(mediaType, id) {
+async function openDetail(mediaType, id, routeState = {}) {
   const signal = newViewSignal();
   view.innerHTML = loadingHtml();
   window.scrollTo({ top: 0, behavior: "instant" });
@@ -274,7 +330,7 @@ async function openDetail(mediaType, id) {
     const data = await api(`/api/${mediaType}/${id}`, { signal });
     if (signal.aborted) return;
     if (mediaType === "movie") renderMovieDetail(data);
-    else renderTvDetail(data);
+    else renderTvDetail(data, routeState);
   } catch (err) {
     showError(err);
   }
@@ -350,7 +406,7 @@ function renderMovieDetail(d) {
   hydrateRelatedCards();
 }
 
-function renderTvDetail(d) {
+function renderTvDetail(d, routeState = {}) {
   view.innerHTML = detailHero(d) + `
     <h3 class="section-title">Seasons</h3>
     <div class="season-tabs" id="season-tabs"></div>
@@ -363,18 +419,20 @@ function renderTvDetail(d) {
 
   const tabs = document.getElementById("season-tabs");
   const seasons = (d.seasons || []).filter((s) => s.season_number >= 1);
+  const targetSeason = Number(routeState.season || seasons[0]?.season_number || 0);
   for (const s of seasons) {
     const tab = document.createElement("button");
-    tab.className = "season-tab";
+    tab.className = `season-tab${s.season_number === targetSeason ? " active" : ""}`;
     tab.textContent = s.name || `Season ${s.season_number}`;
     tab.addEventListener("click", () => {
       tabs.querySelectorAll(".season-tab").forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
+      setRoute(`/tv/${d.id}/season/${s.season_number}`);
       loadEpisodes(d, s.season_number);
     });
     tabs.appendChild(tab);
   }
-  if (seasons.length) tabs.firstChild.click();
+  if (targetSeason) loadEpisodes(d, targetSeason, routeState.episode);
   bindImageFallbacks(view);
   hydrateRelatedCards();
 }
@@ -482,18 +540,43 @@ function enableDragScroll(rail) {
 
     const card = e.target.closest(".mini-card");
     if (card) {
-      openDetail(card.dataset.type, card.dataset.id);
+      navigate(`/${card.dataset.type}/${card.dataset.id}`);
     }
   }, true);
 }
 
-async function loadEpisodes(show, seasonNumber) {
+function episodeList(dataEpisodes, show) {
+  return dataEpisodes.map((episode) => ({
+    episode: episode.episode_number,
+    episode_name: episode.name || "",
+    poster: episode.still || show.poster,
+  }));
+}
+
+function mediaForShowEpisode(show, seasonNumber, ep, episodes) {
+  return {
+    media_type: "tv",
+    type: "tv",
+    tmdb_id: show.id,
+    imdb_id: show.imdb_id || "",
+    season: seasonNumber,
+    episode: ep.episode_number,
+    episode_name: ep.name || "",
+    show_title: show.title,
+    title: `${show.title} S${seasonNumber} E${ep.episode_number}`,
+    poster: ep.still || show.poster,
+    episodes,
+  };
+}
+
+async function loadEpisodes(show, seasonNumber, episodeToPlay = "") {
   const slot = document.getElementById("episodes-slot");
   const signal = newViewSignal();
   slot.innerHTML = loadingHtml("Loading episodes");
   try {
     const data = await api(`/api/tv/${show.id}/season/${seasonNumber}`, { signal });
     if (signal.aborted) return;
+    const episodes = episodeList(data.episodes, show);
     const grid = document.createElement("div");
     grid.className = "episodes";
     for (const ep of data.episodes) {
@@ -509,29 +592,22 @@ async function loadEpisodes(show, seasonNumber) {
         </div>`;
       card.querySelector("h4").textContent = `${ep.episode_number}. ${ep.name || ""}`;
       card.querySelector("p").textContent = ep.overview || "";
-      card.addEventListener("click", () => playMedia({
-        media_type: "tv",
-        type: "tv",
-        tmdb_id: show.id,
-        imdb_id: show.imdb_id || "",
-        season: seasonNumber,
-        episode: ep.episode_number,
-        episode_name: ep.name || "",
-        show_title: show.title,
-        title: `${show.title} S${seasonNumber} E${ep.episode_number}`,
-        poster: ep.still || show.poster,
-        episodes: data.episodes.map((episode) => ({
-          episode: episode.episode_number,
-          episode_name: episode.name || "",
-          poster: episode.still || show.poster,
-        })),
-      }));
+      card.addEventListener("click", () => {
+        setRoute(`/tv/${show.id}/season/${seasonNumber}/episode/${ep.episode_number}`);
+        playMedia(mediaForShowEpisode(show, seasonNumber, ep, episodes));
+      });
       grid.appendChild(card);
     }
     slot.innerHTML = "";
     slot.appendChild(grid);
     bindImageFallbacks(slot);
-    updateSelectedEpisode(currentMedia);
+    if (episodeToPlay) {
+      const ep = data.episodes.find((episode) => Number(episode.episode_number) === Number(episodeToPlay));
+      if (ep) await playMedia(mediaForShowEpisode(show, seasonNumber, ep, episodes));
+      else updateSelectedEpisode(currentMedia);
+    } else {
+      updateSelectedEpisode(currentMedia);
+    }
   } catch (err) {
     showError(err);
   }
@@ -805,12 +881,16 @@ function renderIframePlayer({
   const nextButton = slot.querySelector("#next-episode");
   if (previousButton && previousEpisode) {
     previousButton.addEventListener("click", () => {
-      playMedia(mediaForEpisode(media, previousEpisode));
+      const nextMedia = mediaForEpisode(media, previousEpisode);
+      setRoute(`/tv/${nextMedia.tmdb_id}/season/${nextMedia.season}/episode/${nextMedia.episode}`);
+      playMedia(nextMedia);
     });
   }
   if (nextButton && nextEpisode) {
     nextButton.addEventListener("click", () => {
-      playMedia(mediaForEpisode(media, nextEpisode));
+      const nextMedia = mediaForEpisode(media, nextEpisode);
+      setRoute(`/tv/${nextMedia.tmdb_id}/season/${nextMedia.season}/episode/${nextMedia.episode}`);
+      playMedia(nextMedia);
     });
   }
   const picker = slot.querySelector("#player-provider-select");
@@ -827,8 +907,48 @@ async function bootApp() {
   } catch (err) {
     showError(err);
   }
+  renderCurrentRoute();
+}
+
+function renderCurrentRoute() {
+  clearTimeout(searchDebounceTimer);
+  const path = routePath();
+  const params = new URLSearchParams(location.search);
+  const tvMatch = path.match(/^\/tv\/(\d+)(?:\/season\/(\d+)(?:\/episode\/(\d+))?)?$/);
+  const movieMatch = path.match(/^\/movie\/(\d+)$/);
+
+  if (path === "/") {
+    syncSearchInputs(new URLSearchParams());
+    renderHome();
+    return;
+  }
+  if (path === "/search") {
+    if (!params.get("q")) {
+      setRoute("/", { replace: true });
+      renderHome();
+      return;
+    }
+    syncSearchInputs(params);
+    runSearch({ showLoading: true, resetScroll: true });
+    return;
+  }
+  if (movieMatch) {
+    openDetail("movie", movieMatch[1]);
+    return;
+  }
+  if (tvMatch) {
+    openDetail("tv", tvMatch[1], {
+      season: tvMatch[2] || "",
+      episode: tvMatch[3] || "",
+    });
+    return;
+  }
+
+  setRoute("/", { replace: true });
   renderHome();
 }
+
+window.addEventListener("popstate", renderCurrentRoute);
 
 (async () => {
   try {
