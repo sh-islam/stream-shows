@@ -27,6 +27,7 @@ let fullscreenSyncController = null;
 let searchDebounceTimer = null;
 let currentUser = "";
 let libraryCache = { favorites: [], history: [] };
+let recommendationsCache = [];
 
 function routePath() {
   let path = location.pathname;
@@ -250,7 +251,10 @@ function bindFavoriteButtons(root = document) {
           libraryCache.favorites = data.favorites || [];
         }
         refreshFavoriteButtons();
-        if (routePath() === "/favorites") renderFavoritesPage();
+        if (routePath() === "/favorites") {
+          recommendationsCache = [];
+          renderFavoritesPage();
+        }
       } catch (err) {
         showError(err);
       } finally {
@@ -444,25 +448,53 @@ function renderLibraryGrid(title, items, emptyText, options = {}) {
   setAppVisible(true);
   view.innerHTML = `
     <h3 class="section-title">${title}</h3>
-    <div id="library-grid"></div>`;
+    <div id="library-grid"></div>
+    ${options.afterHtml || ""}`;
   const grid = document.getElementById("library-grid");
   if (!items.length) {
-    view.innerHTML += `<div class="empty">${emptyText}</div>`;
-    return;
+    grid.outerHTML = `<div class="empty">${emptyText}</div>`;
+  } else {
+    grid.className = "grid";
+    items.forEach((item) => grid.appendChild(makeLibraryCard(item, options)));
   }
-  grid.className = "grid";
-  items.forEach((item) => grid.appendChild(makeLibraryCard(item, options)));
   bindImageFallbacks(view);
   bindFavoriteButtons(view);
   window.scrollTo({ top: 0, behavior: "instant" });
 }
 
 function renderFavoritesPage() {
-  renderLibraryGrid("Favorites", libraryCache.favorites || [], "No favorites yet.");
+  renderLibraryGrid("Favorites", libraryCache.favorites || [], "No favorites yet.", {
+    afterHtml: `
+      <h3 class="section-title">Recommended for you</h3>
+      <div id="recommendations-slot">${loadingHtml("Finding picks")}</div>`,
+  });
+  loadRecommendations();
 }
 
 function renderHistoryPage() {
   renderLibraryGrid("History", libraryCache.history || [], "No watch history yet.", { showHeart: false });
+}
+
+async function loadRecommendations() {
+  const slot = document.getElementById("recommendations-slot");
+  if (!slot) return;
+  try {
+    const data = await api("/api/me/recommendations?limit=20");
+    recommendationsCache = data.results || [];
+    if (!recommendationsCache.length) {
+      slot.innerHTML = `<div class="empty">No recommendations yet.</div>`;
+      return;
+    }
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    recommendationsCache.forEach((item) => grid.appendChild(makeTitleCard(item)));
+    slot.innerHTML = "";
+    slot.appendChild(grid);
+    bindImageFallbacks(slot);
+    bindFavoriteButtons(slot);
+  } catch (err) {
+    slot.innerHTML = `<div class="error">${err.message || err}</div>`;
+  }
 }
 
 async function runSearch({
