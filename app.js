@@ -25,7 +25,7 @@ let viewController = null;
 let fullscreenSyncController = null;
 let searchDebounceTimer = null;
 let currentUser = "";
-let libraryCache = { favorites: [] };
+let libraryCache = { favorites: [], resume: {} };
 let recommendationsCache = [];
 
 function routePath() {
@@ -89,7 +89,7 @@ favoritesLink.addEventListener("click", () => navigate("/favorites"));
 logoutLink.addEventListener("click", async () => {
   localStorage.removeItem(AUTH_TOKEN_KEY);
   currentUser = "";
-  libraryCache = { favorites: [] };
+  libraryCache = { favorites: [], resume: {} };
   await api("/api/logout", { method: "POST", body: "{}" }).catch(() => {});
   renderLogin();
 });
@@ -154,6 +154,7 @@ function setCurrentUser(username = "") {
 async function loadLibrary() {
   libraryCache = await api("/api/me/library");
   libraryCache.favorites ||= [];
+  libraryCache.resume ||= {};
   refreshFavoriteButtons();
   return libraryCache;
 }
@@ -194,6 +195,16 @@ function favoritePayload(item) {
 function isFavorite(item) {
   const key = favoriteKey(item);
   return Boolean(key && libraryCache.favorites?.some((fav) => fav.key === key || favoriteKey(fav) === key));
+}
+
+function tvResumeKey(showOrId) {
+  const id = typeof showOrId === "object" ? showOrId?.tmdb_id || showOrId?.id : showOrId;
+  return id ? `tv:${id}` : "";
+}
+
+function resumeForShow(showOrId) {
+  const key = tvResumeKey(showOrId);
+  return key ? libraryCache.resume?.[key] : null;
 }
 
 function favoriteButtonHtml(item, extraClass = "") {
@@ -640,6 +651,10 @@ function renderMovieDetail(d) {
 }
 
 function renderTvDetail(d, routeState = {}) {
+  const savedResume = resumeForShow(d);
+  const shouldResume = savedResume && !routeState.season && !routeState.episode;
+  const initialSeason = shouldResume ? savedResume.season : routeState.season;
+  const initialEpisode = shouldResume ? savedResume.episode : routeState.episode;
   view.innerHTML = detailHero(d) + `
     <h3 class="section-title">Seasons</h3>
     <div class="season-tabs" id="season-tabs"></div>
@@ -652,10 +667,11 @@ function renderTvDetail(d, routeState = {}) {
 
   const tabs = document.getElementById("season-tabs");
   const seasons = (d.seasons || []).filter((s) => s.season_number >= 1);
-  const targetSeason = Number(routeState.season || seasons[0]?.season_number || 0);
+  const targetSeason = Number(initialSeason || seasons[0]?.season_number || 0);
   for (const s of seasons) {
     const tab = document.createElement("button");
     tab.className = `season-tab${s.season_number === targetSeason ? " active" : ""}`;
+    tab.dataset.season = String(s.season_number);
     tab.textContent = s.name || `Season ${s.season_number}`;
     tab.addEventListener("click", () => {
       tabs.querySelectorAll(".season-tab").forEach((t) => t.classList.remove("active"));
@@ -665,7 +681,11 @@ function renderTvDetail(d, routeState = {}) {
     });
     tabs.appendChild(tab);
   }
-  if (targetSeason) loadEpisodes(d, targetSeason, routeState.episode);
+  if (shouldResume) {
+    setRoute(`/tv/${d.id}/season/${savedResume.season}/episode/${savedResume.episode}`, { replace: true });
+  }
+  if (targetSeason) loadEpisodes(d, targetSeason, initialEpisode);
+  addStartOverButton(d, seasons);
   bindImageFallbacks(view);
   bindFavoriteButtons(view);
   hydrateRelatedCards();
@@ -810,8 +830,73 @@ function mediaForShowEpisode(show, seasonNumber, ep, episodes) {
     show_title: show.title,
     title: `${show.title} S${seasonNumber} E${ep.episode_number}`,
     poster: ep.still || show.poster,
+    year: show.year || "",
     episodes,
   };
+}
+
+function resumePayload(media) {
+  return {
+    type: "tv",
+    media_type: "tv",
+    tmdb_id: media.tmdb_id,
+    id: media.tmdb_id,
+    season: media.season,
+    episode: media.episode,
+    episode_name: media.episode_name || "",
+    show_title: media.show_title || media.title || "",
+    title: media.show_title || media.title || "",
+    poster: media.poster || "",
+    year: media.year || "",
+  };
+}
+
+async function saveTvResume(media) {
+  if (!media || media.type !== "tv" || !media.tmdb_id || !media.season || !media.episode) return;
+  try {
+    const data = await api("/api/me/resume", {
+      method: "POST",
+      body: JSON.stringify(resumePayload(media)),
+    });
+    libraryCache.resume = data.resume || {};
+  } catch (err) {
+    console.warn("Could not save resume point", err);
+  }
+}
+
+async function clearTvResume(showId) {
+  const data = await api(`/api/me/resume/${encodeURIComponent(showId)}`, { method: "DELETE" });
+  libraryCache.resume = data.resume || {};
+  return libraryCache.resume;
+}
+
+function addStartOverButton(show, seasons) {
+  const resume = resumeForShow(show);
+  if (!resume) return;
+  const actions = document.getElementById("actions");
+  if (!actions) return;
+  const firstSeason = seasons[0]?.season_number || 1;
+  const button = document.createElement("button");
+  button.className = "secondary";
+  button.type = "button";
+  button.textContent = "Start over";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await clearTvResume(show.id);
+      currentMedia = null;
+      document.getElementById("player-slot").innerHTML = "";
+      setRoute(`/tv/${show.id}/season/${firstSeason}`);
+      document.querySelectorAll(".season-tab").forEach((tab) => tab.classList.remove("active"));
+      document.querySelector(`.season-tab[data-season="${firstSeason}"]`)?.classList.add("active");
+      await loadEpisodes(show, firstSeason);
+      button.remove();
+    } catch (err) {
+      showError(err);
+      button.disabled = false;
+    }
+  });
+  actions.appendChild(button);
 }
 
 async function loadEpisodes(show, seasonNumber, episodeToPlay = "") {
@@ -827,6 +912,7 @@ async function loadEpisodes(show, seasonNumber, episodeToPlay = "") {
     for (const ep of data.episodes) {
       const card = document.createElement("button");
       card.className = "episode";
+      card.dataset.tmdbId = String(show.id);
       card.dataset.season = String(seasonNumber);
       card.dataset.episode = String(ep.episode_number);
       card.innerHTML = `
@@ -862,7 +948,8 @@ function updateSelectedEpisode(media) {
   document.querySelectorAll(".episode.active").forEach((card) => card.classList.remove("active"));
   if (!media || media.type !== "tv") return;
   document.querySelectorAll(".episode").forEach((card) => {
-    const isCurrent = card.dataset.season === String(media.season)
+    const isCurrent = card.dataset.tmdbId === String(media.tmdb_id)
+      && card.dataset.season === String(media.season)
       && card.dataset.episode === String(media.episode);
     card.classList.toggle("active", isCurrent);
   });
@@ -874,6 +961,7 @@ async function playMedia(media, providerName = "") {
   if (signal.aborted) return;
   currentMedia = media;
   updateSelectedEpisode(media);
+  if (media.type === "tv") void saveTvResume(media);
   const selected = providerName || currentProviderName || providersCache.default;
   currentProviderName = selected;
   const qs = new URLSearchParams({

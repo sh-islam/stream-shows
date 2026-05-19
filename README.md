@@ -10,7 +10,7 @@ Live: https://sh-islam.github.io/stream-shows/
 - Home, search, detail, season, episode, and favorites views.
 - Client-side routing so browser Back/Forward works inside the app.
 - Player UI, source selection, fullscreen controls, and episode navigation.
-- Per-user favorites UI synced through the backend.
+- Per-user favorites and TV resume points synced through the backend.
 - Favorites page with backend-generated recommendations.
 - Static assets for icons, fallback posters, and styling.
 
@@ -35,6 +35,8 @@ GET /api/embed-candidates
 GET    /api/me/library
 POST   /api/me/favorites
 DELETE /api/me/favorites/:key
+POST   /api/me/resume
+DELETE /api/me/resume/:id
 GET    /api/me/recommendations
 ```
 
