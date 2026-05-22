@@ -11,12 +11,25 @@
 }
 
 * { box-sizing: border-box; }
+html {
+  min-height: 100%;
+  background-color: var(--bg);
+  overscroll-behavior-y: none;
+}
 html, body {
   margin: 0;
   padding: 0;
-  background: radial-gradient(circle at top left, #1a0f12 0, #0b0b0f 34rem);
+  background-color: var(--bg);
+  background-image: radial-gradient(circle at top left, #1a0f12 0, #0b0b0f 34rem);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   color: var(--text);
   font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+body {
+  min-height: 100vh;
+  min-height: 100svh;
+  overscroll-behavior-y: none;
 }
 
 header {
@@ -116,6 +129,10 @@ button.secondary:hover,
   text-decoration: none;
 }
 main { padding: 1.25rem; max-width: 1400px; margin: 0 auto; }
+main {
+  min-height: calc(100vh - 5rem);
+  min-height: calc(100svh - 5rem);
+}
 
 .grid {
   display: grid; gap: 1rem;
