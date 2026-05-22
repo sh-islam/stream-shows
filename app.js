@@ -985,6 +985,7 @@ async function playMedia(media, providerName = "") {
 function startFallbackPlayer(candidates, media, index, selectedProvider = "") {
   const current = candidates[index];
   currentProviderName = current.provider || selectedProvider || currentProviderName;
+  const availableProviders = candidates.map((candidate) => candidate.provider).filter(Boolean);
   renderIframePlayer({
     url: current.url,
     label: current.label,
@@ -992,15 +993,18 @@ function startFallbackPlayer(candidates, media, index, selectedProvider = "") {
     iframeOptions: current.iframe || {},
     media,
     activeProvider: current.provider,
+    availableProviders,
     onFail: index + 1 < candidates.length ? () => startFallbackPlayer(candidates, media, index + 1) : null,
     fallbackLabel: candidates[index + 1]?.label,
   });
 }
 
-function providerPickerHtml(media, activeProvider) {
+function providerPickerHtml(media, activeProvider, availableProviders = null) {
   if (!media || !providersCache?.providers?.length) return "";
+  const available = Array.isArray(availableProviders) ? new Set(availableProviders) : null;
   const options = providersCache.providers
     .filter((p) => p.enabled !== false && p.supports?.[media.type])
+    .filter((p) => !available || available.has(p.name))
     .map((p) => `<option value="${p.name}" ${p.name === activeProvider ? "selected" : ""}>${p.label || p.name}</option>`)
     .join("");
   if (!options) return "";
@@ -1115,6 +1119,7 @@ function renderIframePlayer({
   iframeOptions = {},
   media = null,
   activeProvider = "",
+  availableProviders = null,
   onFail = null,
   fallbackLabel = "",
 }) {
@@ -1135,7 +1140,7 @@ function renderIframePlayer({
   slot.innerHTML = `
     <div class="player-heading">
       <h3 class="section-title">Player</h3>
-      ${providerPickerHtml(media, activeProvider)}
+      ${providerPickerHtml(media, activeProvider, availableProviders)}
     </div>
     <p class="player-info">Loaded: <b>${safeLabel}</b> - <a href="${safeOpenUrl}" target="_blank" rel="noreferrer">open in new tab</a></p>
     <div class="player-tools">
