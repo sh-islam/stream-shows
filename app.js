@@ -957,7 +957,7 @@ function updateSelectedEpisode(media) {
 
 async function playMedia(media, providerName = "") {
   const signal = newViewSignal();
-  await loadProviders(true);
+  await loadProviders();
   if (signal.aborted) return;
   currentMedia = media;
   updateSelectedEpisode(media);
